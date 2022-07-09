@@ -1,12 +1,15 @@
 #!/bin/bash
 
+DOCKER_BIN=${DOCKER_BIN:-docker}
+DOCKER_COMPOSE_BIN=${DOCKER_COMPOSE_BIN:-docker-compose}
+
 # $1 (Optionally) - if present (value doesn't matter), this test checks if any containers exist. Else, if active (running) containers exis
 __docker_pre_test() {
-  if [[ -z "$1" ]] && [[ $(docker ps --format '{{.Names}}') ]]; then
+  if [[ -z "$1" ]] && [[ $($DOCKER_BIN ps --format '{{.Names}}') ]]; then
     return 0;
   fi
 
-  if [[ ! -z "$1" ]] && [[ $(docker ps -a --format '{{.Names}}') ]]; then
+  if [[ ! -z "$1" ]] && [[ $($DOCKER_BIN ps -a --format '{{.Names}}') ]]; then
     return 0;
   fi
 
@@ -15,7 +18,7 @@ __docker_pre_test() {
 }
 
 __docker_images_pre_test() {
-  if [[ $(docker images -qa) ]]; then
+  if [[ $($DOCKER_BIN images -qa) ]]; then
     return 0;
   fi
   echo "No images found"
@@ -25,14 +28,14 @@ __docker_images_pre_test() {
 #1 (Optional) path to `docker-compose.yml` file
 __docker_compose_pre_test() {
   if [ -z "$1" ]; then
-    if [[ $(docker-compose config --services) ]]; then
+    if [[ $($DOCKER_COMPOSE_BIN config --services) ]]; then
       return 0;
     fi
     echo "No docker-compose.yml found (or it contains errors). You can pass as the first argument a path to the service declaration file."
     return 1;
   fi
 
-  if [[ $(docker-compose --file $1 config --services) ]]; then
+  if [[ $($DOCKER_COMPOSE_BIN --file $1 config --services) ]]; then
     return 0;
   fi
   echo "Invalid service declaration file $1."
@@ -52,7 +55,7 @@ __docker_logs() (
     return 1
   fi
   if [[ "$count" -eq "1" ]]; then
-    eval "docker logs -f $since$2"
+    eval "$DOCKER_BIN logs -f $since$2"
     return 0
   fi
 
@@ -84,7 +87,7 @@ __docker_logs() (
 
     # in bash, to get the pid for `docker logs` (so we can kill it in _exit), use `command1 > >(command2)` instead of `command1 | command2` - see https://stackoverflow.com/a/8048493/2732818
     # sed -u needed as explained in https://superuser.com/a/792051
-    eval "docker logs --timestamps -f $since\"$name\" 2>&1 > >(sed -u -e \"s/^/${color}[${name}]${resetColor} /\" >> $tmpFile) &"
+    eval "$DOCKER_BIN logs --timestamps -f $since\"$name\" 2>&1 > >(sed -u -e \"s/^/${color}[${name}]${resetColor} /\" >> $tmpFile) &"
     local pid=($!)
 
     allPids+=($pid)
@@ -131,7 +134,7 @@ __docker_compose_parse_services_config() {
   local fileref=$(__docker_compose_fileref_generator $1)
 
   # `docker-compose config` normalizes the indentation and format, no matter what the actual file is...
-  local config=$(eval "docker-compose $fileref config")
+  local config=$(eval "$DOCKER_COMPOSE_BIN $fileref config")
 
   local inServicesBlock='false'
   local service=''
@@ -161,12 +164,12 @@ __docker_compose_parse_services_config() {
 dr() {
   __docker_pre_test
   if [ $? -eq 0 ]; then
-    local containers=$(docker ps --format '{{.Names}}' | fzf -m)
+    local containers=$($DOCKER_BIN ps --format '{{.Names}}' | fzf -m)
 
     echo -e "$containers" \
       | while read -r name; do
           echo "Restarting $name..."
-          docker restart $name
+          $DOCKER_BIN restart $name
         done
 
     __docker_logs "1m" "$containers"
@@ -177,7 +180,7 @@ dr() {
 dl() {
   __docker_pre_test "all"
   if [ $? -eq 0 ]; then
-    local containers=$(docker ps -a --format '{{.Names}}' | fzf -m)
+    local containers=$($DOCKER_BIN ps -a --format '{{.Names}}' | fzf -m)
     __docker_logs "$1" "$containers"
   fi
 }
@@ -186,7 +189,7 @@ dl() {
 dla() {
   __docker_pre_test "all"
   if [ $? -eq 0 ]; then
-    local containers=$(docker ps -a --format '{{.Names}}')
+    local containers=$($DOCKER_BIN ps -a --format '{{.Names}}')
     __docker_logs "$1" "$containers"
   fi
 }
@@ -195,7 +198,7 @@ dla() {
 de() {
   __docker_pre_test
   if [ $? -eq 0 ]; then
-    local name=$(docker ps --format '{{.Names}}' | fzf)
+    local name=$($DOCKER_BIN ps --format '{{.Names}}' | fzf)
 
     if [ ! -z "$name" ]; then
       local command="$1"
@@ -205,7 +208,7 @@ de() {
       fi
 
       if [ -z "$command" ]; then
-        local imageName=$(docker inspect --format '{{.Config.Image}}' $name | sed -e 's/:.*$//g') #without version
+        local imageName=$($DOCKER_BIN inspect --format '{{.Config.Image}}' $name | sed -e 's/:.*$//g') #without version
         case "$imageName" in
           "mysql" | "bitnami/mysql" | "mysql/mysql-server" | "percona" | centos/mysql*)
             command='mysql -uroot -p$MYSQL_ROOT_PASSWORD'
@@ -235,7 +238,7 @@ de() {
         command="sh -c '$command'"
       fi
 
-      eval "docker exec -it $name $command"
+      eval "$DOCKER_BIN exec -it $name $command"
     fi
   fi
 }
@@ -243,27 +246,27 @@ de() {
 #docker remove
 drm() {
   __docker_pre_test "all" \
-    && docker ps -aq --format "{{.Names}}" \
+    && $DOCKER_BIN ps -aq --format "{{.Names}}" \
       | fzf -m \
       | while read -r name; do
-          docker rm -f $name
+          $DOCKER_BIN rm -f $name
         done
 }
 
 #docker remove all
 drma() {
   __docker_pre_test "all" \
-    && docker rm $(docker ps -aq) -f
+    && $DOCKER_BIN rm $($DOCKER_BIN ps -aq) -f
 }
 
 #docker stop
 ds() {
   __docker_pre_test \
-    && docker ps --format '{{.Names}}' \
+    && $DOCKER_BIN ps --format '{{.Names}}' \
       | fzf -m  \
       | while read -r name; do
-          docker update --restart=no $name
-          docker stop $name
+          $DOCKER_BIN update --restart=no $name
+          $DOCKER_BIN stop $name
         done
 }
 
@@ -271,20 +274,20 @@ ds() {
 dsa() {
   __docker_pre_test
   if [ $? -eq 0 ]; then
-    docker update --restart=no $(docker ps -q)
-    docker stop $(docker ps -q)
+    $DOCKER_BIN update --restart=no $($DOCKER_BIN ps -q)
+    $DOCKER_BIN stop $($DOCKER_BIN ps -q)
   fi
 }
 
 #docker stop
 dsrm() {
   __docker_pre_test \
-    && docker ps --format '{{.Names}}' \
+    && $DOCKER_BIN ps --format '{{.Names}}' \
       | fzf -m  \
       | while read -r name; do
-          docker update --restart=no $name
-          docker stop $name
-          docker rm -f $name
+          $DOCKER_BIN update --restart=no $name
+          $DOCKER_BIN stop $name
+          $DOCKER_BIN rm -f $name
         done
 }
 
@@ -298,11 +301,11 @@ dsrma() {
 #docker kill
 dk() {
   __docker_pre_test \
-    && docker ps --format '{{.Names}}' | fzf -m --print0 \
+    && $DOCKER_BIN ps --format '{{.Names}}' | fzf -m --print0 \
       | fzf -m \
       | while read -r name; do
-          docker update --restart=no $name
-          docker kill $name
+          $DOCKER_BIN update --restart=no $name
+          $DOCKER_BIN kill $name
         done
 }
 
@@ -310,20 +313,20 @@ dk() {
 dka() {
   __docker_pre_test
   if [ $? -eq 0 ]; then
-    docker update --restart=no $(docker ps -q)
-    docker kill $(docker ps -q)
+    $DOCKER_BIN update --restart=no $($DOCKER_BIN ps -q)
+    $DOCKER_BIN kill $($DOCKER_BIN ps -q)
   fi
 }
 
 #docker kill
 dkrm() {
   __docker_pre_test \
-    && docker ps --format '{{.Names}}' \
+    && $DOCKER_BIN ps --format '{{.Names}}' \
       | fzf -m \
       | while read -r name; do
-          docker update --restart=no $name
-          docker kill $name
-          docker rm -f $name
+          $DOCKER_BIN update --restart=no $name
+          $DOCKER_BIN kill $name
+          $DOCKER_BIN rm -f $name
         done
 }
 
@@ -346,8 +349,8 @@ drmi() {
     local images='';
 
     # create image references for non-dangling images
-    for id in $(docker images --format "{{.ID}}" --filter "dangling=false" | sort | uniq); do #remove duplicate ids. necessary because each image tag has an entry, and images may have multiple tags
-      local references=$(docker inspect "$id" --format "{{range .RepoTags}}{{.}}\n{{end}}{{range .RepoDigests}}{{.}}\n{{end}}");
+    for id in $($DOCKER_BIN images --format "{{.ID}}" --filter "dangling=false" | sort | uniq); do #remove duplicate ids. necessary because each image tag has an entry, and images may have multiple tags
+      local references=$($DOCKER_BIN inspect "$id" --format "{{range .RepoTags}}{{.}}\n{{end}}{{range .RepoDigests}}{{.}}\n{{end}}");
 
       local list=$(echo "$references" | sed 's/\\n$//' | sed -r 's/\\n/\n/g'); #remove trailing new line && replace \n with actual new line
       local listLength=$(echo "$list" | wc -l);
@@ -378,7 +381,7 @@ drmi() {
     done;
 
   # create image references for dangling images
-    local ids=$(docker images --format "{{.ID}}" --filter "dangling=true");
+    local ids=$($DOCKER_BIN images --format "{{.ID}}" --filter "dangling=true");
     local numberOfIds=$(echo "$ids" | wc -l)
     if [[ "$numberOfIds" != "0" ]]; then
       #add option to remove all dangling images
@@ -393,8 +396,8 @@ drmi() {
       #add options, group by label
       local idCreatedLabel='';
       for id in $(echo "$ids" | head -n 20); do
-        local created=$(docker inspect "$id" --format "{{.Created}}");
-        local labels=$(docker inspect "$id" --format '{{ range $key, $value := .Config.Labels }}{{ $key }}:{{$value}}\n{{end}}');
+        local created=$($DOCKER_BIN inspect "$id" --format "{{.Created}}");
+        local labels=$($DOCKER_BIN inspect "$id" --format '{{ range $key, $value := .Config.Labels }}{{ $key }}:{{$value}}\n{{end}}');
 
         while read -r label; do #also entered for no label
           local reference=$(echo -e "$id\t$created\t$label");
@@ -472,7 +475,7 @@ drmi() {
       | sort \
       | uniq \
       | while read -r idToRemove; do
-          docker rmi "$idToRemove"
+          $DOCKER_BIN rmi "$idToRemove"
         done;
   fi;
 }
@@ -480,7 +483,7 @@ drmi() {
 #docker remove all images
 drmia() {
   __docker_images_pre_test \
-    && docker rmi $(docker images -qa) -f
+    && $DOCKER_BIN rmi $($DOCKER_BIN images -qa) -f
 }
 
 #docker clean
@@ -494,10 +497,10 @@ dcu() {
   local fileref=$(__docker_compose_fileref_generator $1)
 
   __docker_compose_pre_test $1 \
-      && eval "docker-compose $fileref config --services" \
+      && eval "$DOCKER_COMPOSE_BIN $fileref config --services" \
         | fzf -m \
         | while read -r service; do
-            eval "docker-compose $fileref up -d $service"
+            eval "$DOCKER_COMPOSE_BIN $fileref up -d $service"
           done
 }
 
@@ -506,7 +509,7 @@ dcua() {
   local fileref=$(__docker_compose_fileref_generator $1)
 
   __docker_compose_pre_test $1 \
-    && eval "docker-compose $fileref up -d"
+    && eval "$DOCKER_COMPOSE_BIN $fileref up -d"
 }
 
 #docker compose build
@@ -517,7 +520,7 @@ dcb() {
     && __docker_compose_parse_services_config "$1" '^    build:.*$' \
       | fzf -m \
       | while read -r service; do
-          eval "docker-compose $fileref build --force-rm --no-cache --pull $service"
+          eval "$DOCKER_COMPOSE_BIN $fileref build --force-rm --no-cache --pull $service"
         done
 }
 
@@ -526,7 +529,7 @@ dcba() {
   local fileref=$(__docker_compose_fileref_generator $1)
 
   __docker_compose_pre_test $1 \
-    && eval "docker-compose $fileref build --force-rm --no-cache --pull --parallel"
+    && eval "$DOCKER_COMPOSE_BIN $fileref build --force-rm --no-cache --pull --parallel"
 }
 
 #docker compose pull
@@ -537,7 +540,7 @@ dcp() {
     && __docker_compose_parse_services_config "$1" '^    image:.*$' \
       | fzf -m \
       | while read -r service; do
-          eval "docker-compose $fileref pull --ignore-pull-failures $service"
+          eval "$DOCKER_COMPOSE_BIN $fileref pull --ignore-pull-failures $service"
         done
 }
 
@@ -546,7 +549,7 @@ dcpa() {
   local fileref=$(__docker_compose_fileref_generator $1)
 
   __docker_compose_pre_test $1 \
-    && eval "docker-compose $fileref pull --ignore-pull-failures"
+    && eval "$DOCKER_COMPOSE_BIN $fileref pull --ignore-pull-failures"
 }
 
 #docker compose update image
@@ -558,13 +561,13 @@ dcupd() {
     local buildServices=$(__docker_compose_parse_services_config "$1" '^    build:.*$')
     local pullServices=$(__docker_compose_parse_services_config "$1" '^    image:.*$')
 
-    eval "docker-compose $fileref config --services" \
+    eval "$DOCKER_COMPOSE_BIN $fileref config --services" \
       | fzf -m \
       | while read -r service; do
           echo -e "$buildServices" \
             | while read -r buildService; do
                 if [[ "$buildService" == "$service" ]]; then
-                  eval "docker-compose $fileref build --force-rm --no-cache --pull $service"
+                  eval "$DOCKER_COMPOSE_BIN $fileref build --force-rm --no-cache --pull $service"
                   continue 2;
                 fi
               done
@@ -572,7 +575,7 @@ dcupd() {
           echo -e "$pullServices" \
             | while read -r pullService; do
                 if [[ "$pullService" == "$service" ]]; then
-                  eval "docker-compose $fileref pull --ignore-pull-failures $service"
+                  eval "$DOCKER_COMPOSE_BIN $fileref pull --ignore-pull-failures $service"
                   continue 2;
                 fi
               done
@@ -603,8 +606,8 @@ fzf-docker-debug-info() {
   shellVersion=$(eval "$shell --version")
   fzfVersion=$(fzf --version)
 
-  dockerVersion=$(docker --version)
-  dockerComposeVersion=$(docker-compose --version)
+  dockerVersion=$($DOCKER_BIN --version)
+  dockerComposeVersion=$($DOCKER_COMPOSE_BIN --version)
 
   dockerExecCustomDefaults=$(test -f "$HOME/.docker-fuzzy-search-exec" && cat "$HOME/.docker-fuzzy-search-exec" || echo "N.A.")
 
